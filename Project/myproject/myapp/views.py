@@ -1,6 +1,8 @@
 from rest_framework import generics, status
 from rest_framework.response import Response
 from .serializers import StockSerializer
+from django.views.decorators.csrf import csrf_protect
+from .models import Stock, StockInfo
 import pandas as pd
 import os
 
@@ -10,28 +12,29 @@ class StockListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         # Read the Excel file and return the data
-        try:
-            df = pd.read_excel('stocks.xlsx')
-            return df.to_dict('records')
-        except FileNotFoundError:
-            return []
+        return Stock.objects.all()
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
-            action = serializer.validated_data.get("action")
-            stock_price = serializer.validated_data.get("stock_price")
-            quantity = serializer.validated_data.get("quantity")
-            split_ratio = serializer.validated_data.get("split_ratio")
+            action = request.data.get("action")
+            stock_price = request.data.get("stock_price")
+            quantity = request.data.get("quantity")
+            split_ratio = request.data.get("split_ratio")
+            
             df = pd.read_excel('./stocks.xlsx')
-            df_final = pd.read_excel('./final.xlsx')
-            average_buy_price, inventory= df_final.loc[:, ['average buy','inventory']].values.tolist()[0]
+            stock_info, _ = StockInfo.objects.get_or_create(id=1)
+            average_buy_price = stock_info.average_buy
+            inventory = stock_info.inventory
             if action == "BUY":
                 average = (inventory*average_buy_price + stock_price*quantity)/(quantity+inventory)
                 print(average)
                 inventory += quantity
-                df.loc[len(df.index)] = [action, stock_price, quantity] 
-                df_final.loc[0] = {"average buy": average, "inventory": inventory}
+                stock_info.average_buy = average
+                stock_info.inventory = inventory
+                new_stock = Stock(action=action, quantity=quantity, stock_price=stock_price)
+                new_stock.save()
+                print(stock_info, new_stock)
                 
             elif action == "SELL":
                 final_quantity = inventory - quantity
@@ -70,7 +73,7 @@ class StockListCreateView(generics.ListCreateAPIView):
                 df = pd.DataFrame(rows, columns=['action', 'stock_price', 'quantity'])
                 df_final.loc[0] = {"average buy": average_buy_price, "inventory": inventory}
             df.to_excel('./stocks.xlsx', index=False)
-            df_final.to_excel('./final.xlsx', index=False)
+            stock_info.save()
         # Append the new data to the Excel file
         # df = pd.DataFrame([serializer.validated_data])
         # with pd.ExcelWriter('stocks.xlsx', mode='a', engine='openpyxl', if_sheet_exists='replace') as writer:

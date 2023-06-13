@@ -1,8 +1,13 @@
 from rest_framework import serializers
+from .models import Stock, StockInfo
 
 class StockSerializer(serializers.Serializer):
-    # stock_name = serializers.CharField(max_length=100)
-    action = serializers.CharField(max_length=5)
-    quantity = serializers.IntegerField(required=False)
-    stock_price = serializers.IntegerField(required=False)
-    split_ratio = serializers.CharField(required=False, max_length=10)
+    class Meta:
+        model = Stock
+        fields = '__all__'
+
+
+class StockInfoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockInfo
+        fields = ('average_buy', 'inventory')
