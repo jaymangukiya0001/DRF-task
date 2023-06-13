@@ -4,9 +4,10 @@ from django.db import models
 
 class Stock(models.Model):
     # stock_name = serializers.CharField(max_length=100)
+    # day = models.CharField(max_length=10)
     action = models.CharField(max_length=5,blank=True, null=True)
-    quantity = models.IntegerField(blank=True, null=True)
     stock_price = models.IntegerField(blank=True, null=True)
+    quantity = models.IntegerField(blank=True, null=True)
     split_ratio = models.CharField(max_length=10,blank=True, null=True)
 
     def __str__(self):

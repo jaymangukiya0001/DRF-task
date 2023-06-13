@@ -2,6 +2,7 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from .serializers import StockSerializer
 from django.views.decorators.csrf import csrf_protect
+from django.db import transaction
 from .models import Stock, StockInfo
 import pandas as pd
 import os
@@ -17,6 +18,7 @@ class StockListCreateView(generics.ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
+            # day = request.data.get("day")
             action = request.data.get("action")
             stock_price = request.data.get("stock_price")
             quantity = request.data.get("quantity")
@@ -37,42 +39,84 @@ class StockListCreateView(generics.ListCreateAPIView):
                 print(stock_info, new_stock)
                 
             elif action == "SELL":
-                final_quantity = inventory - quantity
-                rows = df.values.tolist()
+                print("sell")
+                final_quantity = int(inventory) - int(quantity)
+                data = Stock.objects.all()
+                rows = [[getattr(instance, field.name) for field in Stock._meta.fields] for instance in data]
+                print(rows)
                 i=0
                 s=0
-                while True:
-                    s += rows[i][-1]
-                    if quantity>s:
-                        quantity -= rows[i][-1]
-                        rows[i][-1]=0
-                        i+=1
+                while i<len(rows):
+                    if rows[i][1]=="BUY":
+                        s += rows[i][-2]
+                        if quantity>s:
+                            quantity -= rows[i][-2]
+                            rows[i][-2]=0
+                            i+=1
+                        else:
+                            rows[i][-2] = rows[i][-2] - quantity
+                            break
                     else:
-                        rows[i][-1] = rows[i][-1] - quantity
-                        break
+                        i+=1
                 for i in rows:
-                    if i[-1] == 0:
+                    if i[-2] == 0 and i[1] == "BUY":
                         rows.pop(0)
 
-                average_buy_price = sum([b*c for a,b,c in rows])/final_quantity
+                total_sum = 0
+                for row in rows:
+                    if rows[1]=="BUY":
+                        total_sum+=row[2] * row[3]
+                    
+                average_buy_price = total_sum/final_quantity
                 print(rows)        
                 print(average_buy_price)
-                del df
-                df = pd.DataFrame(rows, columns=['action', 'stock_price', 'quantity'])
-                df_final.loc[0] = {"average buy": average_buy_price, "inventory": inventory}
+                with transaction.atomic():
+                    Stock.objects.all().delete()  # Clear the existing data in the table
+                    for row in rows:
+                        obj = Stock()
+                        try:
+                            obj.day = row[0]
+                            obj.action = row[1]
+                            obj.stock_price = row[2] if row[2] else None
+                            obj.quantity = row[3] if row[3] else None
+                            obj.split_ratio = row[4] if row[4] else None
+                            obj.save()
+                        except Exception:
+                            obj.save()
+
+                stock_info.average_buy = average_buy_price
+                stock_info.inventory = final_quantity
+                new_stock = Stock(action=action, quantity=quantity)
+                new_stock.save()
 
             elif action == "SPLIT":
                 upper_part, lower_part = map(int, split_ratio.split(":"))
-                rows = df.values.tolist()
+                data = Stock.objects.all()
+                rows = [[getattr(instance, field.name) for field in Stock._meta.fields] for instance in data]
+                print(rows)
                 for i in range(len(rows)):
-                    rows[i][-1] =  rows[i][-1]*(upper_part)/lower_part
-                    rows[i][-2] =  rows[i][-2]*(lower_part)/upper_part
+                    if rows[i][1]=="BUY":
+                        rows[i][-2] =  int(rows[i][-2])*(upper_part)/lower_part
+                        rows[i][-3] =  int(rows[i][-3])*(lower_part)/upper_part
                 average_buy_price = average_buy_price*lower_part/upper_part
                 inventory = inventory*upper_part/lower_part
-                del df
-                df = pd.DataFrame(rows, columns=['action', 'stock_price', 'quantity'])
-                df_final.loc[0] = {"average buy": average_buy_price, "inventory": inventory}
-            df.to_excel('./stocks.xlsx', index=False)
+                stock_info.average_buy = average_buy_price
+                stock_info.inventory = inventory
+                with transaction.atomic():
+                    Stock.objects.all().delete()  # Clear the existing data in the table
+                    for row in rows:
+                        obj = Stock()
+                        try:
+                            obj.day = row[0]
+                            obj.action = row[1]
+                            obj.stock_price = row[2] if row[2] else None
+                            obj.quantity = row[3] if row[3] else None
+                            obj.split_ratio = row[4] if row[4] else None
+                            obj.save()
+                        except Exception:
+                            obj.save()
+                new_stock = Stock(action=action, split_ratio=split_ratio)
+                new_stock.save()
             stock_info.save()
         # Append the new data to the Excel file
         # df = pd.DataFrame([serializer.validated_data])
